@@ -3,317 +3,357 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    
-    <title>X(Twitter) Geo-Query Sniper</title>
-    <meta name="description" content="Twitterの特定地域検索コマンドを視覚的に生成するプロフェッショナルツール">
-
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://unpkg.com/maplibre-gl@3.x/dist/maplibre-gl.css" rel="stylesheet" />
-    <script src="https://unpkg.com/maplibre-gl@3.x/dist/maplibre-gl.js"></script>
-    <script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <title>X Geocode Targeting Tool</title>
+    <script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
+    <link href="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css" rel="stylesheet" />
+    <script src="https://bundle.run/@turf/turf@6.5.0"></script>
 
     <style>
-        :root { --sidebar-width: 380px; }
-        body { overflow: hidden; }
-        #map { height: 100vh; width: 100vw; }
-        .debug-panel { display: none; background: rgba(0,0,0,0.8); color: #0f0; font-family: monospace; }
-        .debug-mode .debug-panel { display: block; }
+        :root {
+            --primary-blue: #1d9bf0;
+            --pos-color: #3b82f6;
+            --neg-color: #ef4444;
+            --bg-dark: #15202b;
+            --sidebar-width: 380px;
+            --header-height: 60px;
+        }
+
+        /* Base Reset */
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: var(--bg-dark); color: white; overflow: hidden; height: 100vh; display: flex; flex-direction: column; }
+
+        /* [AD/WIDGET SLOT] 広告などの挿入用 */
+        .ad-space { display: none; }
+
+        /* Layout */
+        header { height: var(--header-height); display: flex; align-items: center; justify-content: space-between; padding: 0 20px; background: rgba(21, 32, 43, 0.9); border-bottom: 1px solid #38444d; z-index: 100; }
         
-        /* Responsive Layout */
+        #main-container { flex: 1; display: flex; position: relative; overflow: hidden; }
+        #map { flex: 1; background: #243447; }
+
+        #sidebar { 
+            width: var(--sidebar-width); 
+            border-left: 1px solid #38444d; 
+            display: flex; 
+            flex-direction: column; 
+            background: var(--bg-dark);
+            z-index: 10;
+        }
+
+        /* Components */
+        .search-box { position: absolute; top: 15px; left: 15px; z-index: 10; display: flex; gap: 5px; }
+        .search-box input { padding: 10px; border-radius: 20px; border: 1px solid #38444d; background: #192734; color: white; width: 250px; }
+
+        .control-panel { padding: 20px; border-bottom: 1px solid #38444d; }
+        .mode-selector { display: flex; gap: 10px; margin-bottom: 15px; }
+        .btn { cursor: pointer; border: none; padding: 8px 16px; border-radius: 18px; font-weight: bold; transition: 0.2s; }
+        .btn-pos { background: var(--pos-color); color: white; }
+        .btn-neg { background: var(--neg-color); color: white; }
+        .btn-ghost { background: transparent; border: 1px solid #536471; color: white; }
+        .btn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+        .circle-list { flex: 1; overflow-y: auto; padding: 10px; }
+        .circle-item { background: #192734; border-radius: 8px; padding: 12px; margin-bottom: 10px; border-left: 4px solid gray; position: relative; }
+        .circle-item.pos { border-left-color: var(--pos-color); }
+        .circle-item.neg { border-left-color: var(--neg-color); }
+        .circle-item .remove { position: absolute; top: 10px; right: 10px; cursor: pointer; color: #536471; }
+
+        .output-area { padding: 20px; background: #192734; border-top: 1px solid #38444d; }
+        .query-display { background: black; padding: 10px; border-radius: 5px; font-family: monospace; font-size: 12px; word-break: break-all; margin-bottom: 10px; min-height: 60px; border: 1px solid #333; }
+        .counter { font-size: 12px; text-align: right; margin-bottom: 5px; }
+        .counter.warn { color: #ffd400; font-weight: bold; }
+        .counter.limit { color: var(--neg-color); font-weight: bold; }
+
+        /* Debug Overlay */
+        #debug-overlay { position: fixed; bottom: 10px; left: 10px; background: rgba(0,0,0,0.8); padding: 10px; font-size: 10px; font-family: monospace; display: none; z-index: 1000; max-width: 300px; border: 1px solid yellow; }
+
+        /* Responsive */
         @media (max-width: 768px) {
-            #sidebar { width: 100%; height: 40%; bottom: 0; top: auto; }
-            #map { height: 60%; }
+            #main-container { flex-direction: column; }
+            #sidebar { width: 100%; height: 40%; border-left: none; border-top: 1px solid #38444d; }
+            --sidebar-width: 100%;
         }
     </style>
 </head>
-<body class="bg-gray-900 text-gray-100 font-sans">
+<body>
 
-    <div class="relative flex h-screen overflow-hidden">
-        
-        <main id="map" class="flex-grow bg-gray-800"></main>
+<header>
+    <div style="font-weight: bold; font-size: 18px;">𝕏 Geocode Targeter</div>
+    <div style="display: flex; gap: 10px;">
+        <button class="btn btn-ghost" onclick="app.undo()" id="undoBtn">↩ 戻る</button>
+        <button class="btn btn-ghost" onclick="app.toggleDebug()">デバッグ</button>
+        <button class="btn btn-pos" onclick="app.copyQuery()">コピー</button>
+    </div>
+</header>
 
-        <aside id="sidebar" class="absolute right-0 top-0 w-[var(--sidebar-width)] h-full bg-gray-900 shadow-2xl flex flex-col border-l border-gray-700 z-10">
-            <header class="p-4 border-b border-gray-700 flex justify-between items-center">
-                <h1 class="font-bold text-lg"><i class="bi bi-crosshair2 mr-2"></i>Geo-Sniper</h1>
-                <div class="flex gap-2">
-                    <button id="btn-debug" class="text-xs bg-gray-700 px-2 py-1 rounded hover:bg-gray-600">DEBUG</button>
-                    <button id="btn-lang" class="text-xs bg-gray-700 px-2 py-1 rounded">JP/EN</button>
-                </div>
-            </header>
+<div id="main-container">
+    <div class="search-box">
+        <input type="text" id="addressSearch" placeholder="場所を検索 (Enterで移動)..." onkeydown="if(event.key==='Enter') app.searchLocation()">
+    </div>
+    
+    <div id="map"></div>
 
-            <div class="p-4 space-y-4 flex-grow overflow-y-auto">
-                <section>
-                    <h2 class="text-xs font-semibold text-gray-400 uppercase mb-2">モード選択</h2>
-                    <div class="grid grid-cols-2 gap-2">
-                        <button id="mode-add" class="bg-blue-600 hover:bg-blue-500 py-2 rounded text-sm font-bold border-2 border-blue-400">
-                            <i class="bi bi-plus-circle mr-1"></i> 追加円
-                        </button>
-                        <button id="mode-subtract" class="bg-gray-800 hover:bg-red-900 py-2 rounded text-sm font-bold border-2 border-transparent hover:border-red-500">
-                            <i class="bi bi-dash-circle mr-1"></i> 除外円
-                        </button>
-                    </div>
-                </section>
+    <div id="sidebar">
+        <div class="control-panel">
+            <div class="mode-selector">
+                <button class="btn btn-pos" onclick="app.setMode('pos')" id="modePos">＋ 加算(0/4)</button>
+                <button class="btn btn-neg" onclick="app.setMode('neg')" id="modeNeg">－ 減算(0/4)</button>
+            </div>
+            <p style="font-size: 11px; color: #8899a6;">地図をクリックして円を配置。ハンドルをドラッグして調整。</p>
+        </div>
 
-                <section>
-                    <h2 class="text-xs font-semibold text-gray-400 uppercase mb-2">エリアリスト</h2>
-                    <div id="fence-list" class="space-y-2">
-                        </div>
-                </section>
+        <div class="circle-list" id="circleList">
             </div>
 
-            <footer class="p-4 bg-gray-800 border-t border-gray-700">
-                <div class="mb-2 flex justify-between items-center">
-                    <span class="text-xs font-semibold text-gray-400">TWITTER QUERY</span>
-                    <span id="char-count" class="text-xs text-blue-400">0 / 500 chars</span>
-                </div>
-                <textarea id="query-output" readonly class="w-full bg-black text-green-400 p-2 text-xs rounded border border-gray-600 h-24 mb-3 cursor-text"></textarea>
-                <div class="flex gap-2">
-                    <button id="btn-copy" class="flex-grow bg-blue-500 hover:bg-blue-600 py-2 rounded font-bold transition">
-                        <i class="bi bi-copy mr-2"></i>コピー
-                    </button>
-                    <button id="btn-x-search" class="bg-white text-black px-4 py-2 rounded font-bold hover:bg-gray-200">
-                        <i class="bi bi-twitter-x"></i>
-                    </button>
-                </div>
-            </footer>
-        </aside>
-
-        <div id="debug-panel" class="debug-panel absolute bottom-4 left-4 p-4 rounded text-[10px] w-80 max-h-64 overflow-auto z-20 pointer-events-none">
-            [DEBUG LOG]<br>
-            <pre id="debug-json"></pre>
+        <div class="output-area">
+            <div class="counter" id="charCounter">0 characters / X Limit: 280</div>
+            <div class="query-display" id="queryText"></div>
+            <div style="display:flex; gap:10px;">
+                <button class="btn btn-ghost" style="flex:1" onclick="app.exportJSON()">JSON保存</button>
+                <button class="btn btn-pos" style="flex:1" onclick="app.openTwitter()">𝕏で検索</button>
+            </div>
         </div>
+    </div>
+</div>
 
-        </div>
+<div id="debug-overlay" id="debugInfo"></div>
 
-    <script>
-        /**
-         * X-Geo-Sniper Core Application
-         * Standard: ES6+, Class-based, SOLID principles
-         */
-        class GeoSniper {
-            constructor() {
-                this.state = {
-                    fences: [], // { id, lat, lng, radius, type: 'plus'|'minus', active: true }
-                    mode: 'plus',
-                    isDirty: false,
-                    lang: 'ja'
-                };
-                
-                this.CONFIG = {
-                    MAX_CHARS: 500,
-                    INITIAL_CENTER: [34.7818, 32.0853], // Tel Aviv
-                    INITIAL_ZOOM: 7,
-                    COLORS: {
-                        plus: '#3b82f6',
-                        minus: '#ef4444'
-                    }
-                };
+<script>
+/**
+ * [ANALYTICS SLOT]
+ * ここにGoogle Analytics等の計測コードを挿入
+ */
 
-                this.initMap();
-                this.bindEvents();
-                this.loadFromStorage();
-            }
+// I18N configuration
+const I18N = {
+    ja: { dirtyMsg: "変更が保存されていません。離脱しますか？", copySuccess: "クエリをコピーしました！" },
+    en: { dirtyMsg: "Unsaved changes. Exit?", copySuccess: "Query copied!" }
+};
+const lang = navigator.language.startsWith('ja') ? 'ja' : 'en';
 
-            // --- Initialization ---
-            initMap() {
-                this.map = new maplibre-gl.Map({
-                    container: 'map',
-                    style: 'https://demotiles.maplibre.org/style.json', // Vector style
-                    center: this.CONFIG.INITIAL_CENTER,
-                    zoom: this.CONFIG.INITIAL_ZOOM
-                });
+class GeocodeApp {
+    constructor() {
+        this.circles = [];
+        this.mode = 'pos';
+        this.undoStack = [];
+        this.isDirty = false;
+        this.isDebug = false;
+        this.map = null;
+        this.initMap();
+        this.bindEvents();
+        this.loadState();
+    }
 
-                this.map.on('click', (e) => this.handleMapClick(e));
-            }
+    initMap() {
+        this.map = new maplibregl.Map({
+            container: 'map',
+            style: 'https://demotiles.maplibre.org/style.json', // 実運用ではMapLibre提供の明るい・暗いタイル推奨
+            center: [34.75, 31.5], // Israel
+            zoom: 7
+        });
 
-            // --- Core Logic ---
-            handleMapClick(e) {
-                const { lng, lat } = e.lngLat;
-                this.addFence(lat, lng);
-            }
-
-            addFence(lat, lng, radius = 50) {
-                const newFence = {
-                    id: 'f-' + Date.now(),
-                    lat: parseFloat(lat.toFixed(5)),
-                    lng: parseFloat(lng.toFixed(5)),
-                    radius: radius,
-                    type: this.state.mode,
-                    active: true
-                };
-                this.state.fences.push(newFence);
-                this.markAsDirty();
-                this.render();
-            }
-
-            removeFence(id) {
-                this.state.fences = this.state.fences.filter(f => f.id !== id);
-                this.markAsDirty();
-                this.render();
-            }
-
-            updateFence(id, updates) {
-                const fence = this.state.fences.find(f => f.id === id);
-                if (fence) Object.assign(fence, updates);
-                this.markAsDirty();
-                this.render();
-            }
-
-            // --- Query Generation ---
-            generateQuery() {
-                const plusParts = this.state.fences
-                    .filter(f => f.active && f.type === 'plus')
-                    .map(f => `geocode:${f.lat},${f.lng},${f.radius}km`);
-
-                const minusParts = this.state.fences
-                    .filter(f => f.active && f.type === 'minus')
-                    .map(f => `-geocode:${f.lat},${f.lng},${f.radius}km`);
-
-                let query = "";
-                if (plusParts.length > 1) {
-                    query = `(${plusParts.join(' OR ')})`;
-                } else if (plusParts.length === 1) {
-                    query = plusParts[0];
+        this.map.on('load', () => {
+            this.map.addSource('circles-source', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+            this.map.addLayer({
+                id: 'circles-layer',
+                type: 'fill',
+                source: 'circles-source',
+                paint: {
+                    'fill-color': ['get', 'color'],
+                    'fill-opacity': 0.3
                 }
-
-                if (minusParts.length > 0) {
-                    query += (query ? " " : "") + minusParts.join(' ');
+            });
+            this.map.addLayer({
+                id: 'circles-outline',
+                type: 'line',
+                source: 'circles-source',
+                paint: {
+                    'line-color': ['get', 'color'],
+                    'line-width': 2
                 }
+            });
+            this.updateMap();
+        });
 
-                return query;
+        this.map.on('click', (e) => {
+            this.addCircle(e.lngLat.lat, e.lngLat.lng);
+        });
+    }
+
+    bindEvents() {
+        window.addEventListener('beforeunload', (e) => {
+            if (this.isDirty) {
+                e.preventDefault();
+                e.returnValue = I18N[lang].dirtyMsg;
             }
+        });
+    }
 
-            // --- UI Rendering ---
-            render() {
-                this.updateLayers();
-                this.updateList();
-                
-                const query = this.generateQuery();
-                document.getElementById('query-output').value = query;
-                
-                // Character count validation
-                const countEl = document.getElementById('char-count');
-                const len = query.length;
-                countEl.textContent = `${len} / ${this.CONFIG.MAX_CHARS} chars`;
-                countEl.className = len > this.CONFIG.MAX_CHARS ? "text-red-500 font-bold" : "text-blue-400";
+    setMode(m) {
+        this.mode = m;
+        document.getElementById('modePos').style.border = m === 'pos' ? '2px solid white' : 'none';
+        document.getElementById('modeNeg').style.border = m === 'neg' ? '2px solid white' : 'none';
+    }
 
-                // Debug Output
-                document.getElementById('debug-json').textContent = JSON.stringify(this.state, null, 2);
-                
-                this.saveToStorage();
-            }
+    // [PERFORMANCE NOTE] Circle generation using Turf.js
+    addCircle(lat, lng, radius = 50) {
+        const count = this.circles.filter(c => c.type === this.mode).length;
+        if (count >= 4) return alert("最大4つまでです");
 
-            updateLayers() {
-                // Clear existing markers/circles (Simplified approach for Single HTML)
-                // In a production app, we would use MapLibre GeoJSON sources for better perf
-                this.state.fences.forEach(f => {
-                    // This is where Circle drawing logic goes.
-                    // For brevity in a single file, we use a robust Source update pattern:
-                    const sourceId = `source-${f.id}`;
-                    const layerId = `layer-${f.id}`;
+        this.saveUndo();
+        const id = Date.now().toString();
+        this.circles.push({ id, lat, lng, radius, type: this.mode, active: true });
+        this.isDirty = true;
+        this.updateAll();
+    }
 
-                    if (!this.map.getSource(sourceId)) {
-                        const circleData = turf.circle([f.lng, f.lat], f.radius, { units: 'kilometers' });
-                        this.map.addSource(sourceId, { type: 'geojson', data: circleData });
-                        this.map.addLayer({
-                            id: layerId,
-                            type: 'fill',
-                            source: sourceId,
-                            paint: {
-                                'fill-color': this.CONFIG.COLORS[f.type],
-                                'fill-opacity': 0.3,
-                                'fill-outline-color': this.CONFIG.COLORS[f.type]
-                            }
-                        });
-                    } else {
-                        const circleData = turf.circle([f.lng, f.lat], f.radius, { units: 'kilometers' });
-                        this.map.getSource(sourceId).setData(circleData);
-                    }
-                });
+    removeCircle(id) {
+        this.saveUndo();
+        this.circles = this.circles.filter(c => c.id !== id);
+        this.updateAll();
+    }
 
-                // Remove deleted layers
-                const currentIds = this.state.fences.map(f => `layer-${f.id}`);
-                this.map.getStyle().layers.forEach(layer => {
-                    if (layer.id.startsWith('layer-') && !currentIds.includes(layer.id)) {
-                        this.map.removeLayer(layer.id);
-                        this.map.removeSource(layer.id.replace('layer-', 'source-'));
-                    }
-                });
-            }
+    updateAll() {
+        this.updateMap();
+        this.renderList();
+        this.generateQuery();
+        this.saveState();
+        this.updateCounters();
+    }
 
-            updateList() {
-                const listEl = document.getElementById('fence-list');
-                listEl.innerHTML = this.state.fences.map(f => `
-                    <div class="bg-gray-800 p-3 rounded border-l-4 ${f.type === 'plus' ? 'border-blue-500' : 'border-red-500'} flex flex-col gap-2">
-                        <div class="flex justify-between items-center text-xs">
-                            <span class="font-bold">${f.type === 'plus' ? '追加' : '除外'} エリア</span>
-                            <button onclick="app.removeFence('${f.id}')" class="text-gray-400 hover:text-red-400"><i class="bi bi-trash"></i></button>
-                        </div>
-                        <div class="grid grid-cols-2 gap-2">
-                            <label class="text-[10px] text-gray-500">半径 (km)
-                                <input type="number" value="${f.radius}" onchange="app.updateFence('${f.id}', {radius: Number(this.value)})" class="w-full bg-gray-700 rounded px-1 text-white">
-                            </label>
-                            <label class="text-[10px] text-gray-500">座標
-                                <div class="text-white truncate text-[9px] mt-1">${f.lat}, ${f.lng}</div>
-                            </label>
-                        </div>
-                    </div>
-                `).join('');
-            }
+    updateMap() {
+        if (!this.map.getSource('circles-source')) return;
+        const features = this.circles.map(c => {
+            const circle = turf.circle([c.lng, c.lat], c.radius, { units: 'kilometers' });
+            circle.properties = { color: c.type === 'pos' ? '#3b82f6' : '#ef4444', id: c.id };
+            return circle;
+        });
+        this.map.getSource('circles-source').setData({ type: 'FeatureCollection', features });
+    }
 
-            // --- Browser & Event Integration ---
-            bindEvents() {
-                document.getElementById('mode-add').addEventListener('click', () => this.setMode('plus'));
-                document.getElementById('mode-subtract').addEventListener('click', () => this.setMode('minus'));
-                document.getElementById('btn-copy').addEventListener('click', () => this.copyToClipboard());
-                document.getElementById('btn-x-search').addEventListener('click', () => this.openTwitter());
-                document.getElementById('btn-debug').addEventListener('click', () => document.body.classList.toggle('debug-mode'));
-                
-                window.addEventListener('beforeunload', (e) => {
-                    if (this.state.isDirty) {
-                        e.preventDefault();
-                        e.returnValue = '';
-                    }
-                });
-            }
+    renderList() {
+        const list = document.getElementById('circleList');
+        list.innerHTML = '';
+        this.circles.forEach(c => {
+            const div = document.createElement('div');
+            div.className = `circle-item ${c.type}`;
+            div.innerHTML = `
+                <div class="remove" onclick="app.removeCircle('${c.id}')">✕</div>
+                <div style="font-weight:bold; font-size:12px; margin-bottom:5px;">${c.type==='pos'?'加算領域':'除外領域'}</div>
+                <div style="font-size:11px; color:#8899a6;">
+                    Lat: ${c.lat.toFixed(4)} Lng: ${c.lng.toFixed(4)}<br>
+                    半径: <input type="number" value="${c.radius}" style="width:50px; background:transparent; color:white; border:1px solid #38444d" 
+                        onchange="app.updateRadius('${c.id}', this.value)"> km
+                </div>
+            `;
+            list.appendChild(div);
+        });
+        
+        document.getElementById('modePos').innerText = `＋ 加算(${this.circles.filter(c=>c.type==='pos').length}/4)`;
+        document.getElementById('modeNeg').innerText = `－ 減算(${this.circles.filter(c=>c.type==='neg').length}/4)`;
+    }
 
-            setMode(mode) {
-                this.state.mode = mode;
-                document.getElementById('mode-add').className = mode === 'plus' ? 'bg-blue-600 border-blue-400 py-2 rounded text-sm font-bold border-2' : 'bg-gray-800 py-2 rounded text-sm font-bold border-2 border-transparent hover:border-blue-500';
-                document.getElementById('mode-subtract').className = mode === 'minus' ? 'bg-red-600 border-red-400 py-2 rounded text-sm font-bold border-2' : 'bg-gray-800 py-2 rounded text-sm font-bold border-2 border-transparent hover:border-red-500';
-            }
-
-            markAsDirty() { this.state.isDirty = true; }
-            
-            saveToStorage() {
-                localStorage.setItem('geo_sniper_data', JSON.stringify(this.state.fences));
-            }
-
-            loadFromStorage() {
-                const saved = localStorage.getItem('geo_sniper_data');
-                if (saved) {
-                    this.state.fences = JSON.parse(saved);
-                    // Wait for map load to render
-                    this.map.once('load', () => this.render());
-                }
-            }
-
-            copyToClipboard() {
-                const q = document.getElementById('query-output');
-                q.select();
-                document.execCommand('copy');
-                alert('コピーしました！');
-            }
-
-            openTwitter() {
-                const q = encodeURIComponent(this.generateQuery());
-                window.open(`https://twitter.com/search?q=${q}&f=live`, '_blank');
-            }
+    updateRadius(id, val) {
+        const c = this.circles.find(x => x.id === id);
+        if (c) {
+            this.saveUndo();
+            c.radius = parseFloat(val);
+            this.updateAll();
         }
+    }
 
-        // Initialize App
-        const app = new GeoSniper();
-    </script>
+    generateQuery() {
+        const pos = this.circles.filter(c => c.type === 'pos').map(c => `geocode:${c.lat.toFixed(5)},${c.lng.toFixed(5)},${c.radius.toFixed(2)}km`);
+        const neg = this.circles.filter(c => c.type === 'neg').map(c => `-geocode:${c.lat.toFixed(5)},${c.lng.toFixed(5)},${c.radius.toFixed(2)}km`);
+        
+        let query = "";
+        if (pos.length > 0) {
+            query = pos.length > 1 ? `(${pos.join(' OR ')})` : pos[0];
+        }
+        if (neg.length > 0) {
+            query += (query ? " " : "") + neg.join(' ');
+        }
+        
+        const display = document.getElementById('queryText');
+        display.innerText = query || "(設定なし)";
+        
+        const counter = document.getElementById('charCounter');
+        const len = query.length;
+        counter.innerText = `${len} characters / X Limit: 280 (500 for Pro)`;
+        counter.className = 'counter' + (len > 500 ? ' limit' : (len > 240 ? ' warn' : ''));
+    }
+
+    async searchLocation() {
+        const query = document.getElementById('addressSearch').value;
+        if (!query) return;
+        try {
+            const res = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&limit=1`);
+            const data = await res.json();
+            if (data.features.length > 0) {
+                const coord = data.features[0].geometry.coordinates;
+                this.map.flyTo({ center: coord, zoom: 10 });
+            }
+        } catch (e) { console.error("Search error", e); }
+    }
+
+    copyQuery() {
+        const text = document.getElementById('queryText').innerText;
+        navigator.clipboard.writeText(text);
+        alert(I18N[lang].copySuccess);
+    }
+
+    openTwitter() {
+        const text = document.getElementById('queryText').innerText;
+        window.open(`https://twitter.com/search?q=${encodeURIComponent(text)}&f=live`, '_blank');
+    }
+
+    saveUndo() {
+        this.undoStack.push(JSON.stringify(this.circles));
+        if (this.undoStack.length > 10) this.undoStack.shift();
+    }
+
+    undo() {
+        if (this.undoStack.length === 0) return;
+        this.circles = JSON.parse(this.undoStack.pop());
+        this.updateAll();
+    }
+
+    saveState() {
+        localStorage.setItem('geo_tool_state', JSON.stringify(this.circles));
+    }
+
+    loadState() {
+        const saved = localStorage.getItem('geo_tool_state');
+        if (saved) {
+            this.circles = JSON.parse(saved);
+            // wait for map load
+            setTimeout(() => this.updateAll(), 1000);
+        }
+    }
+
+    exportJSON() {
+        const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(this.circles));
+        const downloadAnchorNode = document.createElement('a');
+        downloadAnchorNode.setAttribute("href", dataStr);
+        downloadAnchorNode.setAttribute("download", "x_geocode_config.json");
+        document.body.appendChild(downloadAnchorNode);
+        downloadAnchorNode.click();
+        downloadAnchorNode.remove();
+    }
+
+    toggleDebug() {
+        this.isDebug = !this.isDebug;
+        const panel = document.getElementById('debug-overlay');
+        panel.style.display = this.isDebug ? 'block' : 'none';
+        if (this.isDebug) {
+            setInterval(() => {
+                panel.innerText = `DEBUG MODE\nState: ${JSON.stringify(this.circles, null, 2)}\nUndo stack: ${this.undoStack.length}`;
+            }, 500);
+        }
+    }
+}
+
+const app = new GeocodeApp();
+</script>
 </body>
 </html>
