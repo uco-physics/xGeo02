@@ -3,416 +3,317 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>X-Geo-Precision Mapper | 高精度位置情報検索ツール</title>
     
+    <title>X(Twitter) Geo-Query Sniper</title>
+    <meta name="description" content="Twitterの特定地域検索コマンドを視覚的に生成するプロフェッショナルツール">
+
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css" rel="stylesheet" />
-    <script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
+    <link href="https://unpkg.com/maplibre-gl@3.x/dist/maplibre-gl.css" rel="stylesheet" />
+    <script src="https://unpkg.com/maplibre-gl@3.x/dist/maplibre-gl.js"></script>
     <script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
 
     <style>
-        body { margin: 0; padding: 0; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
-        #map { position: absolute; top: 0; bottom: 0; width: 100%; }
-        .sidebar { height: 100vh; overflow-y: auto; z-index: 10; background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(8px); }
-        .custom-marker { cursor: move; }
-        .radius-handle { cursor: ew-resize; }
-        /* MapLibre Canvas Outline Fix */
-        .maplibregl-canvas { outline: none !important; }
+        :root { --sidebar-width: 380px; }
+        body { overflow: hidden; }
+        #map { height: 100vh; width: 100vw; }
+        .debug-panel { display: none; background: rgba(0,0,0,0.8); color: #0f0; font-family: monospace; }
+        .debug-mode .debug-panel { display: block; }
+        
+        /* Responsive Layout */
+        @media (max-width: 768px) {
+            #sidebar { width: 100%; height: 40%; bottom: 0; top: auto; }
+            #map { height: 60%; }
+        }
     </style>
 </head>
-<body class="bg-gray-100">
+<body class="bg-gray-900 text-gray-100 font-sans">
 
-    <div class="relative flex h-screen">
+    <div class="relative flex h-screen overflow-hidden">
         
-        <aside class="sidebar w-96 shadow-2xl flex flex-col border-r border-gray-200">
-            <div class="p-6 border-b border-gray-200 bg-white">
-                <h1 class="text-xl font-bold text-gray-800 flex items-center gap-2">
-                    <i class="fa-brands fa-x-twitter"></i> Geo-Precision
-                </h1>
-                <p class="text-xs text-gray-500 mt-1">X(Twitter) 特殊検索コマンド生成ツール</p>
-            </div>
+        <main id="map" class="flex-grow bg-gray-800"></main>
 
-            <div class="p-4 bg-gray-50 border-b border-gray-200">
-                <label class="text-sm font-semibold text-gray-700 block mb-2">配置モード</label>
-                <div class="grid grid-cols-2 gap-2">
-                    <button onclick="setMode('positive')" id="btn-pos" class="flex items-center justify-center gap-2 py-2 px-4 rounded-lg border-2 border-blue-500 bg-blue-50 text-blue-700 font-bold transition-all">
-                        <i class="fa-solid fa-plus-circle"></i> 検索対象
-                    </button>
-                    <button onclick="setMode('negative')" id="btn-neg" class="flex items-center justify-center gap-2 py-2 px-4 rounded-lg border-2 border-transparent bg-white text-gray-600 hover:border-red-300 transition-all">
-                        <i class="fa-solid fa-minus-circle"></i> 除外対象
-                    </button>
+        <aside id="sidebar" class="absolute right-0 top-0 w-[var(--sidebar-width)] h-full bg-gray-900 shadow-2xl flex flex-col border-l border-gray-700 z-10">
+            <header class="p-4 border-b border-gray-700 flex justify-between items-center">
+                <h1 class="font-bold text-lg"><i class="bi bi-crosshair2 mr-2"></i>Geo-Sniper</h1>
+                <div class="flex gap-2">
+                    <button id="btn-debug" class="text-xs bg-gray-700 px-2 py-1 rounded hover:bg-gray-600">DEBUG</button>
+                    <button id="btn-lang" class="text-xs bg-gray-700 px-2 py-1 rounded">JP/EN</button>
                 </div>
-            </div>
+            </header>
 
-            <div class="flex-1 overflow-y-auto p-4">
-                <h2 class="text-sm font-bold text-gray-400 uppercase tracking-widest mb-4">レイヤー管理</h2>
-                <div id="layer-list" class="space-y-3">
-                    <p id="empty-msg" class="text-center text-gray-400 py-10 text-sm italic">地図をクリックして円を配置してください</p>
-                </div>
-            </div>
-
-            <div class="p-4 bg-gray-900 text-white shadow-inner">
-                <div class="flex justify-between items-center mb-2">
-                    <span class="text-xs font-bold text-blue-400">COMMAND OUTPUT</span>
-                    <button onclick="copyToClipboard()" class="text-xs bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded transition">
-                        <i class="fa-regular fa-copy"></i> Copy
-                    </button>
-                </div>
-                <div id="output-command" class="text-sm font-mono break-all line-clamp-4 min-h-[4.5em] text-gray-300">
+            <div class="p-4 space-y-4 flex-grow overflow-y-auto">
+                <section>
+                    <h2 class="text-xs font-semibold text-gray-400 uppercase mb-2">モード選択</h2>
+                    <div class="grid grid-cols-2 gap-2">
+                        <button id="mode-add" class="bg-blue-600 hover:bg-blue-500 py-2 rounded text-sm font-bold border-2 border-blue-400">
+                            <i class="bi bi-plus-circle mr-1"></i> 追加円
+                        </button>
+                        <button id="mode-subtract" class="bg-gray-800 hover:bg-red-900 py-2 rounded text-sm font-bold border-2 border-transparent hover:border-red-500">
+                            <i class="bi bi-dash-circle mr-1"></i> 除外円
+                        </button>
                     </div>
-                <button onclick="openInTwitter()" class="w-full mt-4 bg-blue-500 hover:bg-blue-400 text-white font-bold py-2 rounded-lg transition-colors flex items-center justify-center gap-2">
-                    <i class="fa-brands fa-x-twitter"></i> Xで検索を開く
-                </button>
+                </section>
+
+                <section>
+                    <h2 class="text-xs font-semibold text-gray-400 uppercase mb-2">エリアリスト</h2>
+                    <div id="fence-list" class="space-y-2">
+                        </div>
+                </section>
             </div>
+
+            <footer class="p-4 bg-gray-800 border-t border-gray-700">
+                <div class="mb-2 flex justify-between items-center">
+                    <span class="text-xs font-semibold text-gray-400">TWITTER QUERY</span>
+                    <span id="char-count" class="text-xs text-blue-400">0 / 500 chars</span>
+                </div>
+                <textarea id="query-output" readonly class="w-full bg-black text-green-400 p-2 text-xs rounded border border-gray-600 h-24 mb-3 cursor-text"></textarea>
+                <div class="flex gap-2">
+                    <button id="btn-copy" class="flex-grow bg-blue-500 hover:bg-blue-600 py-2 rounded font-bold transition">
+                        <i class="bi bi-copy mr-2"></i>コピー
+                    </button>
+                    <button id="btn-x-search" class="bg-white text-black px-4 py-2 rounded font-bold hover:bg-gray-200">
+                        <i class="bi bi-twitter-x"></i>
+                    </button>
+                </div>
+            </footer>
         </aside>
 
-        <main class="flex-1 relative">
-            <div id="map"></div>
-            
-            <div class="absolute top-4 right-4 flex flex-col gap-2">
-                <button onclick="clearAll()" class="bg-white p-3 rounded-full shadow-lg hover:bg-red-50 text-red-500 transition-all" title="全消去">
-                    <i class="fa-solid fa-trash-can"></i>
-                </button>
-                <button onclick="saveSession()" class="bg-white p-3 rounded-full shadow-lg hover:bg-green-50 text-green-600 transition-all" title="保存">
-                    <i class="fa-solid fa-floppy-disk"></i>
-                </button>
-            </div>
-        </main>
-    </div>
+        <div id="debug-panel" class="debug-panel absolute bottom-4 left-4 p-4 rounded text-[10px] w-80 max-h-64 overflow-auto z-20 pointer-events-none">
+            [DEBUG LOG]<br>
+            <pre id="debug-json"></pre>
+        </div>
+
+        </div>
 
     <script>
         /**
-         * CONFIGURATION & CONSTANTS
+         * X-Geo-Sniper Core Application
+         * Standard: ES6+, Class-based, SOLID principles
          */
-        const CONFIG = {
-            center: [34.7818, 32.0853], // Tel Aviv, Israel
-            defaultRadius: 50, // km
-            colors: {
-                positive: '#3b82f6', // Blue-500
-                negative: '#ef4444', // Red-500
-                posFill: 'rgba(59, 130, 246, 0.2)',
-                negFill: 'rgba(239, 68, 68, 0.2)'
-            }
-        };
-
-        /**
-         * APP STATE
-         */
-        let state = {
-            mode: 'positive', // or 'negative'
-            geofences: [], // Array of { id, lat, lng, radius, type, active }
-            map: null,
-            markers: {} // Map object to store marker instances by geofence id
-        };
-
-        /**
-         * INITIALIZATION
-         */
-        document.addEventListener('DOMContentLoaded', () => {
-            initMap();
-            loadSession();
-        });
-
-        function initMap() {
-            state.map = new maplibregl.Map({
-                container: 'map',
-                style: 'https://tile.openstreetmap.jp/styles/osm-bright-ja/style.json',
-                center: CONFIG.center,
-                zoom: 7
-            });
-
-            state.map.on('click', (e) => {
-                // Ignore clicks if they hit a marker or handle (handled by marker events)
-                if (e.originalEvent.target.classList.contains('maplibregl-canvas')) {
-                    addGeofence(e.lngLat.lat, e.lngLat.lng);
-                }
-            });
-
-            state.map.on('load', () => {
-                console.log("Map Loaded Successfully");
-                updateMapLayers();
-            });
-        }
-
-        /**
-         * CORE LOGIC: GEOFENCE MANAGEMENT
-         */
-
-        function setMode(mode) {
-            state.mode = mode;
-            document.getElementById('btn-pos').className = mode === 'positive' 
-                ? 'flex items-center justify-center gap-2 py-2 px-4 rounded-lg border-2 border-blue-500 bg-blue-50 text-blue-700 font-bold transition-all'
-                : 'flex items-center justify-center gap-2 py-2 px-4 rounded-lg border-2 border-transparent bg-white text-gray-600 transition-all';
-            
-            document.getElementById('btn-neg').className = mode === 'negative' 
-                ? 'flex items-center justify-center gap-2 py-2 px-4 rounded-lg border-2 border-red-500 bg-red-50 text-red-700 font-bold transition-all'
-                : 'flex items-center justify-center gap-2 py-2 px-4 rounded-lg border-2 border-transparent bg-white text-gray-600 transition-all';
-        }
-
-        function addGeofence(lat, lng, radius = CONFIG.defaultRadius, type = state.mode) {
-            const id = 'gf-' + Date.now();
-            const fence = {
-                id,
-                lat,
-                lng,
-                radius,
-                type, // 'positive' or 'negative'
-                active: true,
-                name: `${type === 'positive' ? '対象' : '除外'}: ${lat.toFixed(2)},${lng.toFixed(2)}`
-            };
-
-            state.geofences.push(fence);
-            renderUI();
-            updateMapLayers();
-        }
-
-        function deleteGeofence(id) {
-            state.geofences = state.geofences.filter(f => f.id !== id);
-            if (state.markers[id]) {
-                state.markers[id].center.remove();
-                if (state.markers[id].handle) state.markers[id].handle.remove();
-                delete state.markers[id];
-            }
-            renderUI();
-            updateMapLayers();
-        }
-
-        function toggleActive(id) {
-            const fence = state.geofences.find(f => f.id === id);
-            if (fence) fence.active = !fence.active;
-            renderUI();
-            updateMapLayers();
-        }
-
-        /**
-         * MAP RENDERING & INTERACTION
-         */
-
-        function updateMapLayers() {
-            if (!state.map.isStyleLoaded()) return;
-
-            state.geofences.forEach(fence => {
-                const sourceId = `source-${fence.id}`;
-                const layerId = `layer-${fence.id}`;
-
-                // Create or Update Circle Polygon Data
-                const circlePolygon = turf.circle([fence.lng, fence.lat], fence.radius, { units: 'kilometers' });
-
-                if (!state.map.getSource(sourceId)) {
-                    state.map.addSource(sourceId, { type: 'geojson', data: circlePolygon });
-                    state.map.addLayer({
-                        id: layerId,
-                        type: 'fill',
-                        source: sourceId,
-                        paint: {
-                            'fill-color': fence.type === 'positive' ? CONFIG.colors.posFill : CONFIG.colors.negFill,
-                            'fill-outline-color': fence.type === 'positive' ? CONFIG.colors.positive : CONFIG.colors.negative,
-                            'fill-opacity': fence.active ? 1 : 0
-                        }
-                    });
-                    createMarkers(fence);
-                } else {
-                    state.map.getSource(sourceId).setData(circlePolygon);
-                    state.map.setPaintProperty(layerId, 'fill-opacity', fence.active ? 1 : 0);
-                    updateMarkerPositions(fence);
-                }
-            });
-
-            // Cleanup removed layers
-            const currentIds = state.geofences.map(f => f.id);
-            state.map.getStyle().layers.forEach(layer => {
-                if (layer.id.startsWith('layer-gf-')) {
-                    const id = layer.id.replace('layer-', '');
-                    if (!currentIds.includes(id)) {
-                        state.map.removeLayer(layer.id);
-                        state.map.removeSource(`source-${id}`);
+        class GeoSniper {
+            constructor() {
+                this.state = {
+                    fences: [], // { id, lat, lng, radius, type: 'plus'|'minus', active: true }
+                    mode: 'plus',
+                    isDirty: false,
+                    lang: 'ja'
+                };
+                
+                this.CONFIG = {
+                    MAX_CHARS: 500,
+                    INITIAL_CENTER: [34.7818, 32.0853], // Tel Aviv
+                    INITIAL_ZOOM: 7,
+                    COLORS: {
+                        plus: '#3b82f6',
+                        minus: '#ef4444'
                     }
-                }
-            });
+                };
 
-            generateCommand();
-        }
-
-        function createMarkers(fence) {
-            // Center Marker
-            const el = document.createElement('div');
-            el.className = `custom-marker w-4 h-4 rounded-full border-2 border-white shadow-lg`;
-            el.style.backgroundColor = fence.type === 'positive' ? CONFIG.colors.positive : CONFIG.colors.negative;
-            
-            const marker = new maplibregl.Marker({ element: el, draggable: true })
-                .setLngLat([fence.lng, fence.lat])
-                .addTo(state.map);
-
-            marker.on('drag', () => {
-                const lngLat = marker.getLngLat();
-                fence.lng = lngLat.lng;
-                fence.lat = lngLat.lat;
-                updateMapLayers();
-            });
-
-            // Radius Handle (Right side of the circle)
-            const handleEl = document.createElement('div');
-            handleEl.className = 'radius-handle w-3 h-3 bg-white border-2 border-gray-800 rounded-sm shadow-md';
-            
-            const handle = new maplibregl.Marker({ element: handleEl, draggable: true })
-                .setLngLat(getHandlePosition(fence))
-                .addTo(state.map);
-
-            handle.on('drag', () => {
-                const hLngLat = handle.getLngLat();
-                const distance = turf.distance(
-                    turf.point([fence.lng, fence.lat]),
-                    turf.point([hLngLat.lng, hLngLat.lat]),
-                    { units: 'kilometers' }
-                );
-                fence.radius = Math.max(0.1, distance); // Min 100m
-                updateMapLayers();
-            });
-
-            state.markers[fence.id] = { center: marker, handle: handle };
-        }
-
-        function updateMarkerPositions(fence) {
-            const m = state.markers[fence.id];
-            if (m) {
-                m.center.setLngLat([fence.lng, fence.lat]);
-                m.handle.setLngLat(getHandlePosition(fence));
-                m.center.getElement().style.display = fence.active ? 'block' : 'none';
-                m.handle.getElement().style.display = fence.active ? 'block' : 'none';
-            }
-        }
-
-        function getHandlePosition(fence) {
-            // Calculate a point at the edge of the circle (eastward)
-            const destination = turf.destination(
-                turf.point([fence.lng, fence.lat]),
-                fence.radius,
-                90, // Bearing: East
-                { units: 'kilometers' }
-            );
-            return destination.geometry.coordinates;
-        }
-
-        /**
-         * UI & COMMAND GENERATION
-         */
-
-        function generateCommand() {
-            const posCmds = state.geofences
-                .filter(f => f.active && f.type === 'positive')
-                .map(f => `geocode:${f.lat.toFixed(6)},${f.lng.toFixed(6)},${f.radius.toFixed(1)}km`);
-
-            const negCmds = state.geofences
-                .filter(f => f.active && f.type === 'negative')
-                .map(f => `-geocode:${f.lat.toFixed(6)},${f.lng.toFixed(6)},${f.radius.toFixed(1)}km`);
-
-            let finalQuery = "";
-            if (posCmds.length > 0) {
-                finalQuery = posCmds.length > 1 ? `(${posCmds.join(' OR ')})` : posCmds[0];
-            }
-            if (negCmds.length > 0) {
-                finalQuery += (finalQuery ? " " : "") + negCmds.join(' ');
+                this.initMap();
+                this.bindEvents();
+                this.loadFromStorage();
             }
 
-            document.getElementById('output-command').innerText = finalQuery || "コマンドがここに表示されます";
-        }
-
-        function renderUI() {
-            const list = document.getElementById('layer-list');
-            const emptyMsg = document.getElementById('empty-msg');
-            list.innerHTML = '';
-            
-            if (state.geofences.length === 0) {
-                emptyMsg.style.display = 'block';
-                return;
-            }
-            emptyMsg.style.display = 'none';
-
-            state.geofences.forEach(f => {
-                const item = document.createElement('div');
-                item.className = `p-3 rounded-lg border bg-white shadow-sm transition ${f.active ? 'border-gray-200' : 'opacity-50 bg-gray-50'}`;
-                item.innerHTML = `
-                    <div class="flex items-center justify-between mb-2">
-                        <span class="text-xs font-bold ${f.type === 'positive' ? 'text-blue-600' : 'text-red-600'}">
-                            ${f.type === 'positive' ? 'ADD' : 'EXCLUDE'}
-                        </span>
-                        <div class="flex gap-2">
-                            <button onclick="toggleActive('${f.id}')" class="text-gray-400 hover:text-gray-600">
-                                <i class="fa-solid ${f.active ? 'fa-eye' : 'fa-eye-slash'}"></i>
-                            </button>
-                            <button onclick="deleteGeofence('${f.id}')" class="text-gray-400 hover:text-red-500">
-                                <i class="fa-solid fa-trash"></i>
-                            </button>
-                        </div>
-                    </div>
-                    <div class="grid grid-cols-2 gap-2 text-[10px]">
-                        <div>
-                            <label class="text-gray-400 block">緯度/経度</label>
-                            <input type="text" value="${f.lat.toFixed(4)}, ${f.lng.toFixed(4)}" readonly class="bg-transparent font-mono">
-                        </div>
-                        <div>
-                            <label class="text-gray-400 block">半径 (km)</label>
-                            <input type="number" step="0.1" value="${f.radius.toFixed(1)}" 
-                                onchange="updateFenceRadius('${f.id}', this.value)"
-                                class="bg-gray-50 border rounded px-1 w-full font-mono">
-                        </div>
-                    </div>
-                `;
-                list.appendChild(item);
-            });
-        }
-
-        function updateFenceRadius(id, val) {
-            const fence = state.geofences.find(f => f.id === id);
-            if (fence) {
-                fence.radius = parseFloat(val);
-                updateMapLayers();
-            }
-        }
-
-        /**
-         * UTILS & PERSISTENCE
-         */
-
-        function copyToClipboard() {
-            const cmd = document.getElementById('output-command').innerText;
-            navigator.clipboard.writeText(cmd).then(() => {
-                alert("コマンドをコピーしました！");
-            });
-        }
-
-        function openInTwitter() {
-            const cmd = encodeURIComponent(document.getElementById('output-command').innerText);
-            if (!cmd || cmd === "コマンドがここに表示されます") return;
-            window.open(`https://twitter.com/search?q=${cmd}&f=live`, '_blank');
-        }
-
-        function clearAll() {
-            if (confirm("全てのエリアを削除しますか？")) {
-                Object.keys(state.markers).forEach(id => {
-                    state.markers[id].center.remove();
-                    state.markers[id].handle.remove();
+            // --- Initialization ---
+            initMap() {
+                this.map = new maplibre-gl.Map({
+                    container: 'map',
+                    style: 'https://demotiles.maplibre.org/style.json', // Vector style
+                    center: this.CONFIG.INITIAL_CENTER,
+                    zoom: this.CONFIG.INITIAL_ZOOM
                 });
-                state.markers = {};
-                state.geofences = [];
-                renderUI();
-                updateMapLayers();
+
+                this.map.on('click', (e) => this.handleMapClick(e));
+            }
+
+            // --- Core Logic ---
+            handleMapClick(e) {
+                const { lng, lat } = e.lngLat;
+                this.addFence(lat, lng);
+            }
+
+            addFence(lat, lng, radius = 50) {
+                const newFence = {
+                    id: 'f-' + Date.now(),
+                    lat: parseFloat(lat.toFixed(5)),
+                    lng: parseFloat(lng.toFixed(5)),
+                    radius: radius,
+                    type: this.state.mode,
+                    active: true
+                };
+                this.state.fences.push(newFence);
+                this.markAsDirty();
+                this.render();
+            }
+
+            removeFence(id) {
+                this.state.fences = this.state.fences.filter(f => f.id !== id);
+                this.markAsDirty();
+                this.render();
+            }
+
+            updateFence(id, updates) {
+                const fence = this.state.fences.find(f => f.id === id);
+                if (fence) Object.assign(fence, updates);
+                this.markAsDirty();
+                this.render();
+            }
+
+            // --- Query Generation ---
+            generateQuery() {
+                const plusParts = this.state.fences
+                    .filter(f => f.active && f.type === 'plus')
+                    .map(f => `geocode:${f.lat},${f.lng},${f.radius}km`);
+
+                const minusParts = this.state.fences
+                    .filter(f => f.active && f.type === 'minus')
+                    .map(f => `-geocode:${f.lat},${f.lng},${f.radius}km`);
+
+                let query = "";
+                if (plusParts.length > 1) {
+                    query = `(${plusParts.join(' OR ')})`;
+                } else if (plusParts.length === 1) {
+                    query = plusParts[0];
+                }
+
+                if (minusParts.length > 0) {
+                    query += (query ? " " : "") + minusParts.join(' ');
+                }
+
+                return query;
+            }
+
+            // --- UI Rendering ---
+            render() {
+                this.updateLayers();
+                this.updateList();
+                
+                const query = this.generateQuery();
+                document.getElementById('query-output').value = query;
+                
+                // Character count validation
+                const countEl = document.getElementById('char-count');
+                const len = query.length;
+                countEl.textContent = `${len} / ${this.CONFIG.MAX_CHARS} chars`;
+                countEl.className = len > this.CONFIG.MAX_CHARS ? "text-red-500 font-bold" : "text-blue-400";
+
+                // Debug Output
+                document.getElementById('debug-json').textContent = JSON.stringify(this.state, null, 2);
+                
+                this.saveToStorage();
+            }
+
+            updateLayers() {
+                // Clear existing markers/circles (Simplified approach for Single HTML)
+                // In a production app, we would use MapLibre GeoJSON sources for better perf
+                this.state.fences.forEach(f => {
+                    // This is where Circle drawing logic goes.
+                    // For brevity in a single file, we use a robust Source update pattern:
+                    const sourceId = `source-${f.id}`;
+                    const layerId = `layer-${f.id}`;
+
+                    if (!this.map.getSource(sourceId)) {
+                        const circleData = turf.circle([f.lng, f.lat], f.radius, { units: 'kilometers' });
+                        this.map.addSource(sourceId, { type: 'geojson', data: circleData });
+                        this.map.addLayer({
+                            id: layerId,
+                            type: 'fill',
+                            source: sourceId,
+                            paint: {
+                                'fill-color': this.CONFIG.COLORS[f.type],
+                                'fill-opacity': 0.3,
+                                'fill-outline-color': this.CONFIG.COLORS[f.type]
+                            }
+                        });
+                    } else {
+                        const circleData = turf.circle([f.lng, f.lat], f.radius, { units: 'kilometers' });
+                        this.map.getSource(sourceId).setData(circleData);
+                    }
+                });
+
+                // Remove deleted layers
+                const currentIds = this.state.fences.map(f => `layer-${f.id}`);
+                this.map.getStyle().layers.forEach(layer => {
+                    if (layer.id.startsWith('layer-') && !currentIds.includes(layer.id)) {
+                        this.map.removeLayer(layer.id);
+                        this.map.removeSource(layer.id.replace('layer-', 'source-'));
+                    }
+                });
+            }
+
+            updateList() {
+                const listEl = document.getElementById('fence-list');
+                listEl.innerHTML = this.state.fences.map(f => `
+                    <div class="bg-gray-800 p-3 rounded border-l-4 ${f.type === 'plus' ? 'border-blue-500' : 'border-red-500'} flex flex-col gap-2">
+                        <div class="flex justify-between items-center text-xs">
+                            <span class="font-bold">${f.type === 'plus' ? '追加' : '除外'} エリア</span>
+                            <button onclick="app.removeFence('${f.id}')" class="text-gray-400 hover:text-red-400"><i class="bi bi-trash"></i></button>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2">
+                            <label class="text-[10px] text-gray-500">半径 (km)
+                                <input type="number" value="${f.radius}" onchange="app.updateFence('${f.id}', {radius: Number(this.value)})" class="w-full bg-gray-700 rounded px-1 text-white">
+                            </label>
+                            <label class="text-[10px] text-gray-500">座標
+                                <div class="text-white truncate text-[9px] mt-1">${f.lat}, ${f.lng}</div>
+                            </label>
+                        </div>
+                    </div>
+                `).join('');
+            }
+
+            // --- Browser & Event Integration ---
+            bindEvents() {
+                document.getElementById('mode-add').addEventListener('click', () => this.setMode('plus'));
+                document.getElementById('mode-subtract').addEventListener('click', () => this.setMode('minus'));
+                document.getElementById('btn-copy').addEventListener('click', () => this.copyToClipboard());
+                document.getElementById('btn-x-search').addEventListener('click', () => this.openTwitter());
+                document.getElementById('btn-debug').addEventListener('click', () => document.body.classList.toggle('debug-mode'));
+                
+                window.addEventListener('beforeunload', (e) => {
+                    if (this.state.isDirty) {
+                        e.preventDefault();
+                        e.returnValue = '';
+                    }
+                });
+            }
+
+            setMode(mode) {
+                this.state.mode = mode;
+                document.getElementById('mode-add').className = mode === 'plus' ? 'bg-blue-600 border-blue-400 py-2 rounded text-sm font-bold border-2' : 'bg-gray-800 py-2 rounded text-sm font-bold border-2 border-transparent hover:border-blue-500';
+                document.getElementById('mode-subtract').className = mode === 'minus' ? 'bg-red-600 border-red-400 py-2 rounded text-sm font-bold border-2' : 'bg-gray-800 py-2 rounded text-sm font-bold border-2 border-transparent hover:border-red-500';
+            }
+
+            markAsDirty() { this.state.isDirty = true; }
+            
+            saveToStorage() {
+                localStorage.setItem('geo_sniper_data', JSON.stringify(this.state.fences));
+            }
+
+            loadFromStorage() {
+                const saved = localStorage.getItem('geo_sniper_data');
+                if (saved) {
+                    this.state.fences = JSON.parse(saved);
+                    // Wait for map load to render
+                    this.map.once('load', () => this.render());
+                }
+            }
+
+            copyToClipboard() {
+                const q = document.getElementById('query-output');
+                q.select();
+                document.execCommand('copy');
+                alert('コピーしました！');
+            }
+
+            openTwitter() {
+                const q = encodeURIComponent(this.generateQuery());
+                window.open(`https://twitter.com/search?q=${q}&f=live`, '_blank');
             }
         }
 
-        function saveSession() {
-            localStorage.setItem('x_geo_mapper_data', JSON.stringify(state.geofences));
-            alert("現在のエリア設定を保存しました。");
-        }
-
-        function loadSession() {
-            const saved = localStorage.getItem('x_geo_mapper_data');
-            if (saved) {
-                const data = JSON.parse(saved);
-                data.forEach(f => addGeofence(f.lat, f.lng, f.radius, f.type));
-            }
-        }
+        // Initialize App
+        const app = new GeoSniper();
     </script>
 </body>
 </html>
