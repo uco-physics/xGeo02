@@ -3,200 +3,334 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>X Geocode Generator</title>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <style>
-        body { font-family: 'Helvetica Neue', Arial, sans-serif; margin: 0; display: flex; flex-direction: column; height: 100vh; color: #333; }
-        #controls { padding: 15px; background: #fff; border-bottom: 1px solid #ddd; z-index: 1000; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        #map { flex-grow: 1; z-index: 1; }
-        
-        .header-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
-        .lang-select { padding: 5px; border-radius: 4px; border: 1px solid #ccc; }
-        
-        .btn-group { display: flex; gap: 8px; flex-wrap: wrap; }
-        .btn { padding: 10px 16px; cursor: pointer; border: none; border-radius: 20px; font-weight: bold; transition: opacity 0.2s; }
-        .btn-add { background: #1d9bf0; color: white; }
-        .btn-exclude { background: #e0245e; color: white; }
-        .btn-copy { background: #0f1419; color: white; }
-        .btn:hover { opacity: 0.8; }
-        .btn:active { transform: scale(0.98); }
+    <title>X Geo-Targeter Pro | 高精度位置情報検索コマンド生成</title>
+    
+    <meta name="description" content="地図上で検索範囲を指定し、X(Twitter)のgeocode検索コマンドを生成します。イスラエル周辺などの複雑な地域指定にも対応。">
 
-        .result-area { margin-top: 12px; background: #f7f9f9; padding: 12px; border-radius: 8px; border: 1px solid #eff3f4; }
-        #query-display { font-family: monospace; word-break: break-all; color: #1d9bf0; font-size: 0.9rem; }
-        
-        /* 半径調整パネル */
-        #radius-panel {
-            position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
-            background: white; padding: 20px; border-radius: 12px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.2); z-index: 2000;
-            display: none; text-align: center; width: 280px;
+    <script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
+    <link href="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css" rel="stylesheet" />
+    <script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
+
+    <style>
+        :root {
+            --primary-blue: #1d9bf0;
+            --danger-red: #e0245e;
+            --bg-dark: #15202b;
+            --sidebar-width: 380px;
         }
-        input[type=range] { width: 100%; margin: 15px 0; }
-        .instruction { font-size: 0.8rem; color: #536471; margin-bottom: 10px; }
+
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; display: flex; height: 100vh; background: var(--bg-dark); color: white; overflow: hidden; }
+
+        /* レイアウト */
+        #map { flex-grow: 1; height: 100%; position: relative; }
+        #sidebar {
+            width: var(--sidebar-width); background: #000; border-left: 1px solid #333;
+            display: flex; flex-direction: column; padding: 20px; box-sizing: border-box; overflow-y: auto; z-index: 10;
+        }
+
+        /* 住所検索・コントロール */
+        .search-box input { width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #333; background: #111; color: white; box-sizing: border-box; margin-bottom: 15px; }
+        .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px; }
+        
+        /* ボタン */
+        .btn { padding: 12px; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; transition: 0.2s; font-size: 14px; display: flex; align-items: center; justify-content: center; }
+        .btn-plus { background: var(--primary-blue); color: white; }
+        .btn-minus { background: var(--danger-red); color: white; }
+        .btn-util { background: #333; color: white; }
+        .btn:hover { opacity: 0.8; }
+
+        /* 言語切替 */
+        .lang-selector { margin-bottom: 15px; display: flex; gap: 5px; align-items: center; }
+        .btn-lang { padding: 4px 8px; font-size: 11px; background: #222; color: #ccc; border: 1px solid #444; border-radius: 4px; cursor: pointer; }
+        .btn-lang.active { background: var(--primary-blue); color: white; border-color: var(--primary-blue); }
+
+        /* リスト・アイテム */
+        .circle-list { flex-grow: 1; overflow-y: auto; margin-bottom: 20px; }
+        .circle-item { background: #1a1a1a; padding: 12px; border-radius: 8px; margin-bottom: 10px; border-left: 4px solid #333; position: relative; }
+        .type-include { border-left-color: var(--primary-blue); }
+        .type-exclude { border-left-color: var(--danger-red); }
+        .item-info { font-size: 11px; color: #888; margin-bottom: 8px; display: flex; justify-content: space-between; }
+        
+        /* スライダー */
+        .slider-row { display: flex; align-items: center; gap: 10px; }
+        input[type="range"] { flex-grow: 1; accent-color: var(--primary-blue); }
+
+        /* 出力エリア */
+        .query-container { background: #111; border: 1px solid #333; border-radius: 12px; padding: 15px; }
+        #query-display { font-family: monospace; font-size: 12px; color: var(--primary-blue); word-break: break-all; min-height: 50px; display: block; margin-bottom: 10px; }
+        .char-count { font-size: 11px; text-align: right; margin-bottom: 10px; color: #666; }
+        .limit-warn { color: var(--danger-red); font-weight: bold; }
+
+        /* デバッグ・広告スロット */
+        #debug-panel { position: absolute; bottom: 10px; left: 10px; background: rgba(0,0,0,0.8); font-family: monospace; font-size: 10px; padding: 10px; border-radius: 4px; pointer-events: none; display: none; }
+        .ad-slot { margin-top: 15px; min-height: 50px; background: #0a0a0a; border: 1px dashed #222; display: flex; align-items: center; justify-content: center; font-size: 10px; color: #444; }
+
+        @media (max-width: 800px) {
+            body { flex-direction: column; }
+            #sidebar { width: 100%; height: 50%; border-left: none; border-top: 1px solid #333; }
+        }
     </style>
 </head>
 <body>
 
-<div id="controls">
-    <div class="header-row">
-        <h3 style="margin:0" id="ui-title">X Geocode Generator</h3>
-        <select id="langSelect" class="lang-select" onchange="updateLanguage()">
-            <option value="ja">日本語</option>
-            <option value="en">English</option>
-        </select>
+<div id="map">
+    <div id="debug-panel"></div>
+</div>
+
+<div id="sidebar">
+    <h2 style="margin:0 0 15px 0; font-size: 1.2rem;">X Geo-Targeter <span style="color:var(--primary-blue)">Pro</span></h2>
+
+    <div class="lang-selector">
+        <label style="font-size:11px; color:#666">MAP LANG:</label>
+        <button class="btn-lang active" id="lang-ja" onclick="app.setMapLanguage('ja')">日本語</button>
+        <button class="btn-lang" id="lang-en" onclick="app.setMapLanguage('en')">English</button>
+        <button class="btn-lang" id="lang-zh" onclick="app.setMapLanguage('zh')">中国語</button>
     </div>
-    <p class="instruction" id="ui-instruction">1. ボタン選択 → 2. 地図をクリック → 3. 円をクリックして半径調整</p>
-    
-    <div class="btn-group">
-        <button class="btn btn-add" id="ui-btn-add" onclick="setMode('include')">+ 検索範囲</button>
-        <button class="btn btn-exclude" id="ui-btn-exclude" onclick="setMode('exclude')">- 除外範囲</button>
-        <button class="btn btn-copy" id="ui-btn-copy" onclick="copyToClipboard()">コピー</button>
+
+    <div class="search-box">
+        <input type="text" id="addr-search" placeholder="場所を検索してジャンプ..." autocomplete="off">
     </div>
-    
-    <div class="result-area">
-        <div id="query-display">geocode:lat,lng,radiuskm...</div>
+
+    <div class="controls">
+        <button class="btn btn-plus" id="btn-inc" onclick="app.setMode('include')">+ 検索範囲</button>
+        <button class="btn btn-minus" id="btn-exc" onclick="app.setMode('exclude')">- 除外範囲</button>
+    </div>
+
+    <div class="circle-list" id="circle-list">
+        </div>
+
+    <div class="query-container">
+        <code id="query-display">geocode:...</code>
+        <div class="char-count" id="char-count">0 / 500 characters</div>
+        <button class="btn btn-plus" style="width:100%" onclick="app.copyQuery()">コマンドをコピー</button>
+        <div style="display:flex; gap:5px; margin-top:5px;">
+            <button class="btn btn-util" style="flex:1; font-size:11px;" onclick="app.undo()">Undo</button>
+            <button class="btn btn-util" style="flex:1; font-size:11px;" onclick="app.downloadJSON()">JSON保存</button>
+        </div>
+    </div>
+
+    <div class="ad-slot">
+        ADVERTISEMENT / SPONSORED LINKS
     </div>
 </div>
 
-<div id="map"></div>
-
-<div id="radius-panel">
-    <div id="ui-radius-label" style="font-weight:bold;">半径調整</div>
-    <input type="range" id="radius-slider" min="1" max="1000" value="50">
-    <div><span id="radius-val">50</span> km</div>
-    <button class="btn" onclick="closePanel()" style="background:#eee; color:#333; margin-top:10px; width:100%">OK</button>
-</div>
-
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-    // 多言語辞書
-    const translations = {
-        ja: {
-            title: "X Geocode 生成器",
-            instruction: "1. ボタン選択 → 2. 地図をクリックして円を設置 (ダブルクリックで削除)",
-            btnAdd: "+ 検索範囲を追加",
-            btnExclude: "- 除外範囲を追加",
-            btnCopy: "コマンドをコピー",
-            radiusLabel: "半径の調整",
-            copied: "コピーしました！"
-        },
-        en: {
-            title: "X Geocode Generator",
-            instruction: "1. Select mode → 2. Click map to place circle (Double-click to delete)",
-            btnAdd: "+ Add Area",
-            btnExclude: "- Exclude Area",
-            btnCopy: "Copy Command",
-            radiusLabel: "Adjust Radius",
-            copied: "Copied!"
-        }
-    };
+/**
+ * X Geo-Targeter Pro Logic
+ * --------------------------------------------------
+ * // [PERFORMANCE NOTE]
+ * 地図上の円の描画は、Turf.jsで生成したGeoJSONを MapLibreの Source に 
+ * 'setData' で一括反映しています。頻繁な更新（ドラッグ中など）でも
+ * レイヤ個別に再描画せず、Sourceを1つに集約することで負荷を軽減しています。
+ */
 
-    // 地図の初期化（OpenStreetMap標準タイルを使用）
-    const map = L.map('map').setView([35.68, 139.76], 6);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; OpenStreetMap contributors'
-    }).addTo(map);
-
-    let circles = [];
-    let currentMode = null;
-    let selectedCircle = null;
-
-    function updateLanguage() {
-        const lang = document.getElementById('langSelect').value;
-        const t = translations[lang];
-        document.getElementById('ui-title').innerText = t.title;
-        document.getElementById('ui-instruction').innerText = t.instruction;
-        document.getElementById('ui-btn-add').innerText = t.btnAdd;
-        document.getElementById('ui-btn-exclude').innerText = t.btnExclude;
-        document.getElementById('ui-btn-copy').innerText = t.btnCopy;
-        document.getElementById('ui-radius-label').innerText = t.radiusLabel;
+class XGeoApp {
+    constructor() {
+        this.state = {
+            circles: [],
+            mode: null,
+            lang: 'ja',
+            isDirty: false
+        };
+        this.history = [];
+        this.map = null;
+        this.initMap();
     }
 
-    function setMode(mode) {
-        currentMode = mode;
-        document.getElementById('map').style.cursor = 'crosshair';
+    initMap() {
+        this.map = new maplibregl.Map({
+            container: 'map',
+            style: 'https://tile.openstreetmap.jp/styles/osm-bright-ja/style.json',
+            center: [34.78, 31.5], // 初期位置: イスラエル
+            zoom: 6
+        });
+
+        this.map.on('load', () => {
+            this.setupLayers();
+            this.setMapLanguage('ja');
+            this.bindUI();
+            this.loadState();
+        });
+
+        // 離脱防止警告
+        window.addEventListener('beforeunload', (e) => {
+            if (this.state.isDirty) e.preventDefault();
+        });
     }
 
-    map.on('click', function(e) {
-        if (!currentMode) return;
-
-        const isInclude = currentMode === 'include';
-        const color = isInclude ? '#1d9bf0' : '#e0245e';
+    setupLayers() {
+        this.map.addSource('circle-src', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
         
-        const circle = L.circle(e.latlng, {
-            color: color,
-            fillColor: color,
-            fillOpacity: 0.4,
-            radius: 50000, // 50km
-            mode: currentMode
-        }).addTo(map);
+        // 追加（青）と除外（赤）をMatch式で描画
+        this.map.addLayer({
+            id: 'circle-layer',
+            type: 'fill',
+            source: 'circle-src',
+            paint: {
+                'fill-color': ['match', ['get', 'type'], 'include', '#1d9bf0', '#e0245e'],
+                'fill-opacity': 0.3,
+                'fill-outline-color': ['match', ['get', 'type'], 'include', '#1d9bf0', '#e0245e']
+            }
+        });
+    }
 
-        // 円クリックで編集
-        circle.on('click', function(ev) {
-            L.DomEvent.stopPropagation(ev);
-            openPanel(circle);
+    setMapLanguage(langCode) {
+        this.state.lang = langCode;
+        const style = this.map.getStyle();
+        style.layers.forEach(layer => {
+            if (layer.layout && layer.layout['text-field']) {
+                this.map.setLayoutProperty(layer.id, 'text-field', [
+                    'coalesce', ['get', 'name:' + langCode], ['get', 'name:en'], ['get', 'name']
+                ]);
+            }
+        });
+        document.querySelectorAll('.btn-lang').forEach(b => b.classList.remove('active'));
+        document.getElementById('lang-' + langCode).classList.add('active');
+    }
+
+    setMode(mode) {
+        this.state.mode = mode;
+        this.map.getCanvas().style.cursor = mode ? 'crosshair' : '';
+    }
+
+    bindUI() {
+        this.map.on('click', (e) => {
+            if (!this.state.mode) return;
+            this.saveHistory();
+            const newCircle = {
+                id: Date.now().toString(),
+                lat: e.lngLat.lat,
+                lng: e.lngLat.lng,
+                radius: 50,
+                type: this.state.mode
+            };
+            
+            if (this.state.circles.filter(c => c.type === this.state.mode).length < 4) {
+                this.state.circles.push(newCircle);
+                this.update();
+            } else {
+                alert("各モード最大4つまで登録可能です。");
+            }
+            this.setMode(null);
         });
 
-        // ダブルクリックで削除
-        circle.on('dblclick', function(ev) {
-            L.DomEvent.stopPropagation(ev);
-            map.removeLayer(circle);
-            circles = circles.filter(c => c !== circle);
-            closePanel();
-            updateQuery();
-        });
-
-        circles.push(circle);
-        updateQuery();
-        currentMode = null;
-        document.getElementById('map').style.cursor = '';
-    });
-
-    function openPanel(circle) {
-        selectedCircle = circle;
-        const panel = document.getElementById('radius-panel');
-        const slider = document.getElementById('radius-slider');
-        const valDisp = document.getElementById('radius-val');
-        
-        panel.style.display = 'block';
-        slider.value = Math.round(circle.getRadius() / 1000);
-        valDisp.innerText = slider.value;
-
-        slider.oninput = function() {
-            valDisp.innerText = this.value;
-            selectedCircle.setRadius(this.value * 1000);
-            updateQuery();
+        // 住所検索
+        document.getElementById('addr-search').onkeydown = async (e) => {
+            if (e.key === 'Enter') {
+                try {
+                    const res = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(e.target.value)}&limit=1`);
+                    const data = await res.json();
+                    if (data.features.length > 0) {
+                        const [lng, lat] = data.features[0].geometry.coordinates;
+                        this.map.flyTo({ center: [lng, lat], zoom: 9 });
+                    }
+                } catch (err) { console.error("Search Error", err); }
+            }
         };
     }
 
-    function closePanel() {
-        document.getElementById('radius-panel').style.display = 'none';
-        selectedCircle = null;
+    update() {
+        this.state.isDirty = true;
+        this.renderMap();
+        this.renderList();
+        this.generateQuery();
+        this.saveState();
+        this.updateDebug();
     }
 
-    function updateQuery() {
-        const query = circles.map(c => {
-            const lat = c.getLatLng().lat.toFixed(4);
-            const lng = c.getLatLng().lng.toFixed(4);
-            const rad = Math.round(c.getRadius() / 1000);
-            const prefix = c.options.mode === 'exclude' ? '-' : '';
-            return `${prefix}geocode:${lat},${lng},${rad}km`;
-        }).join(' ');
-        
-        document.getElementById('query-display').innerText = query || "geocode:lat,lng,radiuskm";
+    renderMap() {
+        const features = this.state.circles.map(c => {
+            const poly = turf.circle([c.lng, c.lat], c.radius, { units: 'kilometers' });
+            poly.properties = { type: c.type, id: c.id };
+            return poly;
+        });
+        this.map.getSource('circle-src').setData({ type: 'FeatureCollection', features });
     }
 
-    function copyToClipboard() {
-        const text = document.getElementById('query-display').innerText;
-        const lang = document.getElementById('langSelect').value;
-        navigator.clipboard.writeText(text).then(() => {
-            alert(translations[lang].copied);
+    renderList() {
+        const container = document.getElementById('circle-list');
+        container.innerHTML = '';
+        this.state.circles.forEach(c => {
+            const item = document.createElement('div');
+            item.className = `circle-item type-${c.type}`;
+            item.innerHTML = `
+                <div class="item-info">
+                    <span>${c.type.toUpperCase()}</span>
+                    <span>${c.lat.toFixed(4)}, ${c.lng.toFixed(4)}</span>
+                </div>
+                <div class="slider-row">
+                    <input type="range" min="1" max="500" value="${c.radius}" 
+                        oninput="app.updateRadius('${c.id}', this.value)">
+                    <span style="font-size:12px; width:40px;">${c.radius}k</span>
+                    <button class="btn btn-util" style="padding:2px 8px;" onclick="app.removeCircle('${c.id}')">×</button>
+                </div>
+            `;
+            container.appendChild(item);
         });
     }
 
-    // 初期言語セット
-    updateLanguage();
-</script>
+    updateRadius(id, val) {
+        this.state.circles = this.state.circles.map(c => c.id === id ? { ...c, radius: parseInt(val) } : c);
+        this.update();
+    }
 
+    removeCircle(id) {
+        this.saveHistory();
+        this.state.circles = this.state.circles.filter(c => c.id !== id);
+        this.update();
+    }
+
+    generateQuery() {
+        const parts = this.state.circles.map(c => {
+            const prefix = c.type === 'include' ? '' : '-';
+            return `${prefix}geocode:${c.lat.toFixed(5)},${c.lng.toFixed(5)},${c.radius}km`;
+        });
+        const query = parts.join(' ');
+        document.getElementById('query-display').innerText = query || '円を配置してください';
+        
+        const count = query.length;
+        const countEl = document.getElementById('char-count');
+        countEl.innerText = `${count} / 500 characters`;
+        countEl.className = count > 500 ? 'char-count limit-warn' : 'char-count';
+    }
+
+    // ストレージ・履歴管理
+    saveState() { localStorage.setItem('x_geo_pro_data', JSON.stringify(this.state.circles)); }
+    loadState() {
+        const saved = localStorage.getItem('x_geo_pro_data');
+        if (saved) { this.state.circles = JSON.parse(saved); this.update(); }
+    }
+    saveHistory() {
+        this.history.push(JSON.stringify(this.state.circles));
+        if (this.history.length > 20) this.history.shift();
+    }
+    undo() {
+        if (this.history.length > 0) {
+            this.state.circles = JSON.parse(this.history.pop());
+            this.update();
+        }
+    }
+
+    updateDebug() {
+        const panel = document.getElementById('debug-panel');
+        panel.innerText = `Circles: ${this.state.circles.length}\nLang: ${this.state.lang}\nDirty: ${this.state.isDirty}`;
+    }
+
+    copyQuery() {
+        const q = document.getElementById('query-display').innerText;
+        navigator.clipboard.writeText(q).then(() => alert("コピー完了"));
+    }
+
+    downloadJSON() {
+        const blob = new Blob([JSON.stringify(this.state.circles, null, 2)], { type: 'application/json' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'geo_config.json';
+        a.click();
+    }
+}
+
+const app = new XGeoApp();
+</script>
 </body>
 </html>
